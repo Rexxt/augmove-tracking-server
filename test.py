@@ -1,46 +1,37 @@
-import cv2, numpy as np, imutils, colorsys
+import cv2, numpy as np, imutils
+from stacking import stackImages
 camera = cv2.VideoCapture(0)
 
-def stackImages(imgArray,scale,lables=[]):
-    sizeW = imgArray[0][0].shape[1]
-    sizeH = imgArray[0][0].shape[0]
-    rows = len(imgArray)
-    cols = len(imgArray[0])
-    rowsAvailable = isinstance(imgArray[0], list)
-    width = imgArray[0][0].shape[1]
-    height = imgArray[0][0].shape[0]
-    if rowsAvailable:
-        for x in range ( 0, rows):
-            for y in range(0, cols):
-                imgArray[x][y] = cv2.resize(imgArray[x][y], (sizeW, sizeH), None, scale, scale)
-                if len(imgArray[x][y].shape) == 2: imgArray[x][y]= cv2.cvtColor( imgArray[x][y], cv2.COLOR_GRAY2BGR)
-        imageBlank = np.zeros((height, width, 3), np.uint8)
-        hor = [imageBlank]*rows
-        hor_con = [imageBlank]*rows
-        for x in range(0, rows):
-            hor[x] = np.hstack(imgArray[x])
-            hor_con[x] = np.concatenate(imgArray[x])
-        ver = np.vstack(hor)
-        ver_con = np.concatenate(hor)
-    else:
-        for x in range(0, rows):
-            imgArray[x] = cv2.resize(imgArray[x], (sizeW, sizeH), None, scale, scale)
-            if len(imgArray[x].shape) == 2: imgArray[x] = cv2.cvtColor(imgArray[x], cv2.COLOR_GRAY2BGR)
-        hor= np.hstack(imgArray)
-        hor_con= np.concatenate(imgArray)
-        ver = hor
-    if len(lables) != 0:
-        eachImgWidth= int(ver.shape[1] / cols)
-        eachImgHeight = int(ver.shape[0] / rows)
-        print(eachImgHeight)
-        for d in range(0, rows):
-            for c in range (0,cols):
-                cv2.rectangle(ver,(c*eachImgWidth,eachImgHeight*d),(c*eachImgWidth+len(lables[d][c])*13+27,30+eachImgHeight*d),(255,255,255),cv2.FILLED)
-                cv2.putText(ver,lables[d][c],(eachImgWidth*c+10,eachImgHeight*d+20),cv2.FONT_HERSHEY_COMPLEX,0.7,(255,0,255),2)
-    return ver
+def convert_rgb_to_hsv(ls: list):
+	red, green, blue = ls[0], ls[1], ls[2]
+	#get rgb percentage: range (0-1, 0-1, 0-1 )
 
-MAX = np.array([205/255*179, 255, 128],np.uint8)
-MIN = np.array([215/255*179, 255, 30/100*255],np.uint8)
+	value = max(red, green, blue)
+	if value != 0:
+		saturation = (value-min(red, green, blue))/value
+	else:
+		saturation = 0
+	
+	if value == red:
+		hue = 60*(green-blue)/(value-min(red, green, blue))
+	elif value == green:
+		hue = 120 + 60*(blue-red)/(value-min(red, green, blue))
+	elif value == blue:
+		hue = 240 + 60*(red-green)/(value-min(red, green, blue))
+	
+	if hue < 0:
+		hue += 360
+
+	# hue /= 2
+	# saturation *= 255
+	# value *= 255
+
+	return hue, saturation, value
+
+MAX = np.array([140,255,255])
+MIN = np.array([100,150,0])
+# MAX = np.array(convert_rgb_to_hsv([0, 0, 255]))
+# MIN = np.array(convert_rgb_to_hsv([4, 18, 96]))
 
 while True:
 	# grab the current frame
@@ -50,13 +41,35 @@ while True:
 	## convert to hsv
 	hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-	## mask of orange
+	## mask of blue
 	mask = cv2.inRange(hsv, MIN, MAX)
-	mask = cv2.erode(mask, None, iterations=3)
-	mask = cv2.dilate(mask, None, iterations=3)
+	mask = cv2.erode(mask, None, iterations=4)
+	mask = cv2.dilate(mask, None, iterations=4)
 
 	## final mask and masked
 	target = cv2.bitwise_and(frame, frame, mask=mask)
+
+	# find contours in the mask and initialize the current
+	# (x, y) center of the ball
+	cnts = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL,
+		cv2.CHAIN_APPROX_SIMPLE)[-2]
+	center = None
+
+	# only proceed if at least one contour was found
+	if len(cnts) > 0:
+		# find the largest contour in the mask, then use
+		# it to compute the minimum enclosing circle and
+		# centroid
+		c = max(cnts, key=cv2.contourArea)
+		((x, y), radius) = cv2.minEnclosingCircle(c)
+		M = cv2.moments(c)
+		center = (int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"]))
+
+		cv2.drawContours(target, cnts,-1,(0,255,0),3)
+
+		# draw the circle and centroid on the frame
+		cv2.circle(frame, (int(x), int(y)), int(radius), (0,255,255), 2)
+		cv2.circle(frame, center, 5, (255,255,0), -1)
 
 	# loop over each of the individual channels and display them
 	h, s, v = cv2.split(hsv)

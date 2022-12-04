@@ -4,26 +4,33 @@ import argparse
 import imutils
 import cv2
 import time
-import colorsys
+from stacking import stackImages
 
-def convert_rgb_to_hsv(ls: list):
+""" def convert_rgb_to_hsv(ls: list):
 	red, green, blue = ls[0], ls[1], ls[2]
 	#get rgb percentage: range (0-1, 0-1, 0-1 )
 
-	red_percentage= red / float(255)
-	green_percentage= green / float(255)
-	blue_percentage=blue / float(255)
+	value = max(red, green, blue)
+	if value != 0:
+		saturation = (value-min(red, green, blue))/value
+	else:
+		saturation = 0
 	
-	#get hsv percentage: range (0-1, 0-1, 0-1)
-	color_hsv_percentage=colorsys.rgb_to_hsv(red_percentage, green_percentage, blue_percentage) 
+	if value == red:
+		hue = 60*(green-blue)/(value-min(red, green, blue))
+	elif value == green:
+		hue = 120 + 60*(blue-red)/(value-min(red, green, blue))
+	elif value == blue:
+		hue = 240 + 60*(red-green)/(value-min(red, green, blue))
+	
+	if hue < 0:
+		hue += 360
 
-	#get normal hsv: range (0-360, 0-255, 0-255)
-	color_h=round(179*color_hsv_percentage[0])
-	color_s=round(255*color_hsv_percentage[1])
-	color_v=round(255*color_hsv_percentage[2])
-	color_hsv=(color_h, color_s, color_h)
+	hue /= 2
+	saturation *= 255
+	value *= 255
 
-	return np.array([color_h, color_s, color_h], np.uint8)
+	return hue, saturation, value """
 
 config = json.load(open('config.json', 'r'))
 controllers = config['hsv_controller_colours']
@@ -45,6 +52,14 @@ new_frame_time = 0
 # frames
 frames = 0
 
+for con in controllers:
+	print(con)
+	for k in con:
+		print(k)
+		for l in con[k]:
+			print(l)
+			con[k][l] = np.array(con[k][l])
+
 # keep looping
 while True:
 	# grab the current frame
@@ -59,22 +74,21 @@ while True:
 	blurred = cv2.GaussianBlur(frame, (11, 11), 0)
 	hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 	
-	tracked_controllers = []
+	tracked_controllers = {}
 	for i in range(len(controllers)):
 		con = controllers[i]
-		tracked_controllers = {}
 
 		print(con)
 
-		mask1 = cv2.inRange(hsv, convert_rgb_to_hsv(con['L']['lower']), convert_rgb_to_hsv(con['L']['upper']))
-		cv2.imshow("mask1", mask1)
-		mask1 = cv2.erode(mask1, None, iterations=2)
-		mask1 = cv2.dilate(mask1, None, iterations=2)
+		mask1 = cv2.inRange(hsv, con['L']['lower'], con['L']['upper'])
+		mask1 = cv2.erode(mask1, None, iterations=3)
+		mask1 = cv2.dilate(mask1, None, iterations=3)
 
-		mask2 = cv2.inRange(hsv, convert_rgb_to_hsv(con['R']['lower']), convert_rgb_to_hsv(con['R']['upper']))
-		cv2.imshow("mask2", mask2)
-		mask2 = cv2.erode(mask2, None, iterations=2)
-		mask2 = cv2.dilate(mask2, None, iterations=2)
+		mask2 = cv2.inRange(hsv, con['R']['lower'], con['R']['upper'])
+		mask2 = cv2.erode(mask2, None, iterations=3)
+		mask2 = cv2.dilate(mask2, None, iterations=3)
+
+		target = cv2.bitwise_and(frame, frame, mask=cv2.bitwise_or(mask1, mask2))
 
 		# find contours in the mask and initialize the current
 		# (x, y) center of the ball
@@ -94,11 +108,12 @@ while True:
 
 			# only proceed if the radius meets a minimum size
 			if radius > 10:
-				# draw the circle and centroid on the frame,
-				# then update the list of tracked points
-				cv2.circle(frame, (int(x), int(y)), int(radius),
-					con['L']['upper'], 2)
-				cv2.circle(frame, center, 5, con['L']['lower'], -1)
+				# draw the circle and centroid on the frame
+				cv2.circle(frame, (int(x), int(y)), int(radius), (0,255,255), 2)
+				cv2.circle(frame, center1, 5, (255,255,0), -1)
+
+				if not i in tracked_controllers:
+					tracked_controllers[i] = [None, None]
 
 				# update controller position
 				tracked_controllers[i][0] = [x, y]
@@ -123,9 +138,11 @@ while True:
 			if radius > 10:
 				# draw the circle and centroid on the frame,
 				# then update the list of tracked points
-				cv2.circle(frame, (int(x), int(y)), int(radius),
-					con['R']['upper'], 2)
-				cv2.circle(frame, center, 5, con['R']['lower'], -1)
+				cv2.circle(frame, (int(x), int(y)), int(radius), (255,0,255), 2)
+				cv2.circle(frame, center2, 5, (0,128,255), -1)
+
+				if not i in tracked_controllers:
+					tracked_controllers[i] = [None, None]
 
 				# update controller position
 				tracked_controllers[i][1] = [x, y]
@@ -149,7 +166,7 @@ while True:
 	cv2.putText(frame, avg_fps, (40, 25), font, 1, (0, 128, 255), 3, cv2.LINE_AA)
 
 	# show the frame to our screen
-	cv2.imshow("Frame", frame)
+	cv2.imshow("Frame", stackImages([[frame, target], [mask1, mask2]], 0.5, labels=[['', f'Con {len(controllers)-1} Frame & (Mask1|Mask2)'], [f'Con {len(controllers)-1} L', f'Con {len(controllers)-1} R']]))
 	key = cv2.waitKey(1) & 0xFF
 
 	# if the 'q' key is pressed, stop the loop
