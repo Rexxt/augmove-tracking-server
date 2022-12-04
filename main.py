@@ -5,6 +5,8 @@ import imutils
 import cv2
 import time
 from stacking import stackImages
+import hug
+from falcon import get_http_status
 
 """ def convert_rgb_to_hsv(ls: list):
 	red, green, blue = ls[0], ls[1], ls[2]
@@ -60,6 +62,17 @@ for con in controllers:
 			print(l)
 			con[k][l] = np.array(con[k][l])
 
+@hug.get()
+def present_controllers():
+	return list(tracked_controllers.keys())
+
+@hug.get()
+def get_controller_status(id: hug.types.number, response):
+	if id in tracked_controllers:
+		return tracked_controllers[id]
+	else:
+		response.status = get_http_status(404)
+
 # keep looping
 while True:
 	# grab the current frame
@@ -79,6 +92,8 @@ while True:
 		con = controllers[i]
 
 		print(con)
+
+		height, width, channels = frame.shape
 
 		mask1 = cv2.inRange(hsv, con['L']['lower'], con['L']['upper'])
 		mask1 = cv2.erode(mask1, None, iterations=3)
@@ -116,7 +131,7 @@ while True:
 					tracked_controllers[i] = [None, None]
 
 				# update controller position
-				tracked_controllers[i][0] = [x, y]
+				tracked_controllers[i][0] = [x, y, radius]
 		
 		# find contours in the mask and initialize the current
 		# (x, y) center of the ball
@@ -145,7 +160,7 @@ while True:
 					tracked_controllers[i] = [None, None]
 
 				# update controller position
-				tracked_controllers[i][1] = [x, y]
+				tracked_controllers[i][1] = [x, y, radius]
 
 	frames += 1
 	# time when we finish processing for this frame
